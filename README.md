@@ -87,8 +87,6 @@ split (`mimic-cxr-2.0.0-split.csv.gz`).
 
 ## Reproducing experiments
 
-TODO: minimal command examples for the main table and ablations.
-
 All shell scripts assume the project root as the working directory:
 
 ```bash
@@ -104,8 +102,51 @@ Or invoke a single run directly:
 ```bash
 python src/run_tta_experiments_ours.py \
     --source mimic_ch --target chexpert \
-    --batch-size 32 --device cuda --exp_id demo
+    --batch-size 32 --device cuda
 ```
+
+Each invocation auto-creates a fresh run directory at
+`results/<YYYYMMDD>/<NNN>/` (NNN = next 3-digit index). The shell scripts
+above bundle a whole sweep into a single run directory.
+
+---
+
+## Development notes (internal)
+
+> The section below is for the maintainer's own workflow during rebuttal.
+
+A persistent Docker container `cowa-test` is configured on the dev server
+with the codebase + cached test tensors mounted in. Do **not** `docker rm`
+it — keep it around for quick rebuttal iteration.
+
+```bash
+# Start a stopped container
+docker start cowa-test
+
+# Open an interactive shell
+docker exec -it cowa-test bash
+
+# Stop when done (state preserved; restart with `docker start`)
+docker stop cowa-test
+```
+
+If the container is ever accidentally removed, recreate it with:
+
+```bash
+docker run -d --name cowa-test \
+    --gpus all --shm-size=8g \
+    -v /home/tako/disk/sdc/jwj_/CoWA-clean:/workspace/CoWA \
+    -v /home/tako/disk/sdc/jwj_/DiffCE/miccai26/help/test:/workspace/CoWA/data:ro \
+    -w /workspace/CoWA \
+    pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime sleep infinity
+docker exec cowa-test pip install --no-cache-dir -r requirements.txt
+```
+
+The `data/` mount points at the original `help/test/` location — no
+duplicate copy of the 7 GB testset cache is made. Results written to
+`/workspace/CoWA/results/` inside the container appear at
+`/home/tako/disk/sdc/jwj_/CoWA-clean/results/` on the host (root-owned;
+clean up via `docker exec cowa-test rm -rf results`).
 
 ## Citation
 

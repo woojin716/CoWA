@@ -288,7 +288,8 @@ def run_all_experiments(
     target_datasets: List[str] = None,
     batch_size: int = 32,
     device: str = 'cuda',
-    output_dir: str = 'results/tta_experiments',
+    output_dir: str = 'results',
+    run_dir: str = None,
     exp_id: str = None,
     cache_dir: str = DEFAULT_CACHE_DIR,
     **tta_kwargs
@@ -297,8 +298,12 @@ def run_all_experiments(
     if target_datasets is None:
         target_datasets = TARGET_DATASETS
 
-    output_path = Path(output_dir) / exp_id
-    output_path.mkdir(parents=True, exist_ok=True)
+    if run_dir is not None:
+        output_path = Path(run_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+    else:
+        from run_utils import make_run_dir
+        output_path = make_run_dir(output_dir)
 
     summary_csv = output_path / 'tta_summary.csv'
     detail_csv = output_path / 'tta_detail.csv'
@@ -416,10 +421,13 @@ def main():
                         help='Device (default: cuda)')
     parser.add_argument('--threshold', type=float, default=0.5,
                         help='Classification threshold (default: 0.5)')
-    parser.add_argument('--output-dir', type=str, default='results/tta_experiments',
-                        help='Output directory (default: results/tta_experiments)')
-    parser.add_argument('--exp_id', type=str, required=True, dest='exp_id',
-                        help='Experiment ID (short description of the experiment)')
+    parser.add_argument('--output-dir', type=str, default='results',
+                        help='Base output directory (default: results). '
+                             'Auto-creates <output_dir>/<YYYYMMDD>/<NNN>/ unless --run-dir is given.')
+    parser.add_argument('--run-dir', type=str, default=None, dest='run_dir',
+                        help='Specific run directory (overrides auto-creation under --output-dir).')
+    parser.add_argument('--exp_id', type=str, default=None, dest='exp_id',
+                        help='Optional experiment label (logged to exp.log).')
     parser.add_argument('--cache-dir', type=str, default=DEFAULT_CACHE_DIR,
                         help=f'Directory containing testset_*.pt files (default: {DEFAULT_CACHE_DIR})')
     # Ours 하이퍼파라미터 (default=None → 미지정 시 config 파일 값 사용)
@@ -475,6 +483,7 @@ def main():
         batch_size=args.batch_size,
         device=args.device,
         output_dir=args.output_dir,
+        run_dir=args.run_dir,
         exp_id=args.exp_id,
         cache_dir=args.cache_dir,
         **tta_kwargs

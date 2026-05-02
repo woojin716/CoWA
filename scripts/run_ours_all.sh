@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ours online-eval: source 3개 × target 조합 순차 실행 (single GPU)
-# 결과는 하나의 exp_id 디렉토리에 tta_summary.csv / tta_detail.csv로 저장
+# 결과는 하나의 run 디렉토리(results/<YYYYMMDD>/<NNN>/)에 누적
 
 set -e
 
@@ -8,7 +8,7 @@ export OMP_NUM_THREADS=8
 export MKL_NUM_THREADS=8
 export TORCH_NUM_THREADS=8
 
-EXP_ID="${1:-ours_temp}"
+EXP_ID="${1:-ours}"
 BATCH_SIZE="${2:-32}"
 DEVICE="cuda"
 
@@ -37,9 +37,8 @@ echo "  BATCH_SIZE:    $BATCH_SIZE"
 echo "  Total runs:    $TOTAL (sequential)"
 echo "============================================"
 
-OUTPUT_DIR="results/tta_experiments"
-RESULT_DIR="${OUTPUT_DIR}/${EXP_ID}"
-mkdir -p "$RESULT_DIR"
+RESULT_DIR=$(python src/run_utils.py results)
+echo "Results directory: $RESULT_DIR"
 
 FAILED=0
 
@@ -53,6 +52,7 @@ for i in "${!EXPERIMENTS[@]}"; do
         --target "$TARGET" \
         --batch-size "$BATCH_SIZE" \
         --device "$DEVICE" \
+        --run-dir "$RESULT_DIR" \
         --exp_id "${EXP_ID}" || {
         echo "FAILED: ${SOURCE}→${TARGET}"
         FAILED=$((FAILED + 1))
@@ -63,7 +63,6 @@ echo ""
 echo "============================================"
 if (( FAILED > 0 )); then
     echo "WARNING: $FAILED / $TOTAL experiments failed!"
-    echo "Check logs: ${LOG_DIR}/"
 else
     echo "All $TOTAL experiments completed!"
 fi

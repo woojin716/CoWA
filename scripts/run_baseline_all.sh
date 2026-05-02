@@ -1,6 +1,6 @@
 #!/bin/bash
 # Baseline eval: source × target 조합 순차 실행 (single GPU)
-# 결과는 하나의 exp_id 디렉토리에 tta_summary.csv / tta_detail.csv로 저장
+# 결과는 하나의 run 디렉토리(results/<YYYYMMDD>/<NNN>/)에 누적
 
 set -e
 
@@ -8,7 +8,7 @@ export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export TORCH_NUM_THREADS=4
 
-EXP_ID="${1:-baseline_online_all}"
+EXP_ID="${1:-baseline}"
 BATCH_SIZE="${2:-64}"
 DEVICE="${3:-cuda}"
 SEEDS="${4:-42}"  # 쉼표로 구분된 seed 목록 (e.g., "42,123,456")
@@ -40,9 +40,8 @@ echo "  SEEDS:         $SEEDS"
 echo "  Total runs:    $TOTAL (sequential)"
 echo "============================================"
 
-OUTPUT_DIR="results/tta_experiments"
-RESULT_DIR="${OUTPUT_DIR}/${EXP_ID}"
-mkdir -p "$RESULT_DIR"
+RESULT_DIR=$(python src/run_utils.py results)
+echo "Results directory: $RESULT_DIR"
 
 FAILED=0
 
@@ -66,6 +65,7 @@ for seed_idx in "${!SEED_ARRAY[@]}"; do
             --method all \
             --batch-size "$BATCH_SIZE" \
             --device "$DEVICE" \
+            --run-dir "$RESULT_DIR" \
             --exp_id "${EXP_ID}_seed${SEED}" \
             --seed "$SEED" || {
             echo "FAILED: ${SOURCE}→${TARGET} (seed=$SEED)"
@@ -81,13 +81,9 @@ if (( FAILED > 0 )); then
 else
     echo "All experiments completed successfully!"
 fi
-echo ""
-echo "Results saved to:"
-for SEED in "${SEED_ARRAY[@]}"; do
-    echo "  - ${OUTPUT_DIR}/${EXP_ID}_seed${SEED}/"
-    echo "    - tta_summary.csv"
-    echo "    - tta_detail.csv"
-done
+echo "Results saved to: ${RESULT_DIR}/"
+echo "  - tta_summary.csv"
+echo "  - tta_detail.csv"
 echo "============================================"
 
 exit $FAILED
