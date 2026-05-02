@@ -40,12 +40,12 @@ Tested with Python 3.10, PyTorch 2.x, single NVIDIA GPU.
 
 ## Data
 
-### Quick path: pre-processed test tensors (recommended for reviewers)
+### Quick path: pre-processed test tensors
 
 To skip raw data download and torchxrayvision preprocessing, we provide cached
 test tensors (one `.pt` per dataset, xrayvision-preprocessed and ready to consume).
 
-**Download**: <TODO: Google Drive link>
+**Download**: https://drive.google.com/drive/folders/1Gtdlwx-TKqgvJYOSlcSj3jgxaQSYzyBp?usp=drive_link
 
 After download, place files so the layout is:
 
