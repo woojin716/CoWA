@@ -7,7 +7,7 @@ TTA 실험 실행 스크립트 (Ours - Offline Evaluation) - Cached Version
 사용법:
     python run_tta_experiments_ours_cached.py --source chexpert --target mimic --exp_id ours_test1
     python run_tta_experiments_ours_cached.py --source chexpert --target all --exp_id ours_test1
-    python run_tta_experiments_ours_cached.py --source chexpert --target all --exp_id ours_test1 --cache-dir ./help/test
+    python run_tta_experiments_ours_cached.py --source chexpert --target all --exp_id ours_test1 --cache-dir ./data
 """
 
 import os
@@ -38,7 +38,7 @@ from tta_ours_weight_modified import get_ours_adapter
 # 실험 설정
 TTA_METHODS = ['ours']
 TARGET_DATASETS = ['chexpert', 'mimic', 'vindr', 'nih']
-DEFAULT_CACHE_DIR = './help/test'
+DEFAULT_CACHE_DIR = './data'
 
 
 class CachedTestDataset(torch.utils.data.Dataset):

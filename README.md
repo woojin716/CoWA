@@ -51,15 +51,14 @@ After download, place files so the layout is:
 
 ```
 CoWA/
-└── help/
-    └── test/
-        ├── testset_chexpert.pt
-        ├── testset_mimic.pt
-        ├── testset_nih.pt
-        └── testset_vindr.pt
+└── data/
+    ├── testset_chexpert.pt
+    ├── testset_mimic.pt
+    ├── testset_nih.pt
+    └── testset_vindr.pt
 ```
 
-This matches the default `--cache-dir ./help/test` in the runners. The `help/`
+This matches the default `--cache-dir ./data` in the runners. The `data/`
 directory is gitignored — these files live outside version control.
 
 ### Source-domain classifiers

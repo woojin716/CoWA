@@ -7,7 +7,7 @@ TTA Baseline 실험 실행 스크립트 - Cached Version
 사용법:
     python run_tta_experiments_baseline_cached.py --source chexpert --target mimic --method tent --exp_id test1
     python run_tta_experiments_baseline_cached.py --source chexpert --target all --method all --exp_id test1
-    python run_tta_experiments_baseline_cached.py --source chexpert --target all --method all --exp_id test1 --cache-dir ./help/test
+    python run_tta_experiments_baseline_cached.py --source chexpert --target all --method all --exp_id test1 --cache-dir ./data
 """
 
 import os
@@ -36,7 +36,7 @@ from tta_baselines_offline import get_adapter, OFFLINE_BASELINES
 # 실험 설정
 TTA_METHODS = OFFLINE_BASELINES
 TARGET_DATASETS = ['chexpert', 'mimic', 'vindr', 'nih']
-DEFAULT_CACHE_DIR = './help/test'
+DEFAULT_CACHE_DIR = './data'
 
 
 class CachedTestDataset(torch.utils.data.Dataset):
