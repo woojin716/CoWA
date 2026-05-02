@@ -1,0 +1,117 @@
+# =====================================================
+# Datasets, model weights, large artifacts (do NOT commit)
+# =====================================================
+data/
+pretrained/
+model_features/
+help/
+results/
+.preprocessing_cache/
+.test_cache/
+
+# Binary / weight / feature files
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npy
+*.npz
+*.pkl
+*.h5
+*.hdf5
+*.parquet
+*.feather
+
+# Large media (whitelist specific figures under figures/ if needed)
+*.mp4
+*.mov
+*.avi
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+
+# =====================================================
+# Python
+# =====================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# =====================================================
+# Jupyter
+# =====================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+# Strip notebook outputs before committing (or use nbstripout)
+
+# =====================================================
+# Logs / runs / wandb
+# =====================================================
+*.log
+logs/
+runs/
+wandb/
+mlruns/
+lightning_logs/
+outputs/
+output/
+tb_logs/
+tensorboard/
+
+# =====================================================
+# IDE / editors
+# =====================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.claude/
+
+# =====================================================
+# Secrets
+# =====================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# =====================================================
+# Project-specific stray outputs (review case by case)
+# =====================================================
+output.png
+image_stats.json
+ablation_results_*.json
