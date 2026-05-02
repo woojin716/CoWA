@@ -1,0 +1,14 @@
+numpy
+pandas
+matplotlib
+scipy
+seaborn
+tqdm
+scikit-learn
+# torch>=2.0.0
+# torchvision
+torchxrayvision
+# pydicom  # VinDR-CXR 데이터셋용
+#monai
+# networkx
+# Pillow
