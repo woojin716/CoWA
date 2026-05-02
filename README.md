@@ -115,38 +115,53 @@ above bundle a whole sweep into a single run directory.
 
 > The section below is for the maintainer's own workflow during rebuttal.
 
-A persistent Docker container `cowa-test` is configured on the dev server
+A persistent Docker container `miccai_rbt` is configured on the dev server
 with the codebase + cached test tensors mounted in. Do **not** `docker rm`
-it — keep it around for quick rebuttal iteration.
+it — keep it around for quick rebuttal iteration. The container runs as
+`uid=1000` (tako), so any files it writes (e.g. `results/`) are owned by
+tako and can be deleted from the host without `sudo`.
 
 ```bash
 # Start a stopped container
-docker start cowa-test
+docker start miccai_rbt
 
 # Open an interactive shell
-docker exec -it cowa-test bash
+docker exec -it miccai_rbt bash
 
 # Stop when done (state preserved; restart with `docker start`)
-docker stop cowa-test
+docker stop miccai_rbt
 ```
 
 If the container is ever accidentally removed, recreate it with:
 
 ```bash
-docker run -d --name cowa-test \
+docker run -d --name miccai_rbt \
     --gpus all --shm-size=8g \
+    --user 1000:1000 -e HOME=/home/cowa \
+    -v miccai_rbt-home:/home/cowa \
     -v /home/tako/disk/sdc/jwj_/CoWA-clean:/workspace/CoWA \
     -v /home/tako/disk/sdc/jwj_/DiffCE/miccai26/help/test:/workspace/CoWA/data:ro \
     -w /workspace/CoWA \
     pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime sleep infinity
-docker exec cowa-test pip install --no-cache-dir -r requirements.txt
+```
+
+The `miccai_rbt-home` volume holds the pip `--user` site, so deps survive
+container removal. Only if that volume is also gone, run this first to
+re-create it and install deps:
+
+```bash
+docker volume create miccai_rbt-home
+docker run --rm -v miccai_rbt-home:/h \
+    pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime chown 1000:1000 /h
+# (then run the `docker run -d ...` above, then:)
+docker exec miccai_rbt pip install --user --no-cache-dir -r requirements.txt
 ```
 
 The `data/` mount points at the original `help/test/` location — no
 duplicate copy of the 7 GB testset cache is made. Results written to
 `/workspace/CoWA/results/` inside the container appear at
-`/home/tako/disk/sdc/jwj_/CoWA-clean/results/` on the host (root-owned;
-clean up via `docker exec cowa-test rm -rf results`).
+`/home/tako/disk/sdc/jwj_/CoWA-clean/results/` on the host as tako, so
+`rm -rf results` works from the host directly.
 
 ## Citation
 
