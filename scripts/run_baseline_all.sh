@@ -1,6 +1,6 @@
 #!/bin/bash
-# Baseline eval: source × target 조합 순차 실행 (single GPU)
-# 결과는 하나의 run 디렉토리(results/<YYYYMMDD>/<NNN>/)에 누적
+# Baselines: run source x target combinations sequentially on a single GPU.
+# Results accumulate in one run directory (results/<YYYYMMDD>/<NNN>/).
 
 set -e
 
@@ -11,17 +11,16 @@ export TORCH_NUM_THREADS=4
 EXP_ID="${1:-baseline}"
 BATCH_SIZE="${2:-64}"
 DEVICE="${3:-cuda}"
-SEEDS="${4:-42}"  # 쉼표로 구분된 seed 목록 (e.g., "42,123,456")
+SEEDS="${4:-42}"  # comma-separated seed list (e.g., "42,123,456")
 
-# source → target 매핑
+# source -> target mapping (sources: chexpert, nih; each adapts to the other 3)
 declare -A TARGETS
 TARGETS[chexpert]="mimic,vindr,nih"
-TARGETS[mimic_ch]="chexpert,nih,vindr"
-TARGETS[nih]="vindr"
+TARGETS[nih]="chexpert,mimic,vindr"
 
-# 실험 목록 생성
+# Build experiment list
 JOBS=()
-for SOURCE in nih; do
+for SOURCE in chexpert nih; do
     IFS=',' read -ra TGTS <<< "${TARGETS[$SOURCE]}"
     for TARGET in "${TGTS[@]}"; do
         JOBS+=("${SOURCE}|${TARGET}")
@@ -40,12 +39,12 @@ echo "  SEEDS:         $SEEDS"
 echo "  Total runs:    $TOTAL (sequential)"
 echo "============================================"
 
-RESULT_DIR=$(python src/run_utils.py results)
+RESULT_DIR=$(python src/utils.py results)
 echo "Results directory: $RESULT_DIR"
 
 FAILED=0
 
-# Parse SEEDS (쉼표로 구분된 seed 목록을 배열로 변환)
+# Parse SEEDS (comma-separated list into an array)
 IFS=',' read -ra SEED_ARRAY <<< "$SEEDS"
 TOTAL_SEEDS=${#SEED_ARRAY[@]}
 
@@ -59,7 +58,7 @@ for seed_idx in "${!SEED_ARRAY[@]}"; do
 
         echo "[$((i+1))/$TOTAL] source=$SOURCE → target=$TARGET  (device=$DEVICE, seed=$SEED)"
 
-        python src/run_tta_experiments_baseline_cached.py \
+        python src/run_baselines.py \
             --source "$SOURCE" \
             --target "$TARGET" \
             --method all \

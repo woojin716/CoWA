@@ -1,13 +1,13 @@
 """
-TTA Baseline 실험 실행 스크립트 - Cached Version
+TTA baseline experiment runner (cached version).
 
-사전 저장된 testset_*.pt 파일을 로드하여 데이터 전처리 시간을 절약.
-(.pt 파일은 save_test_dataset.py로 생성, xrayvision 전처리 완료 상태)
+Loads pre-saved testset_*.pt files (created by save_test_dataset.py with
+xrayvision preprocessing applied) to skip data preprocessing time.
 
-사용법:
-    python run_tta_experiments_baseline_cached.py --source chexpert --target mimic --method tent --exp_id test1
-    python run_tta_experiments_baseline_cached.py --source chexpert --target all --method all --exp_id test1
-    python run_tta_experiments_baseline_cached.py --source chexpert --target all --method all --exp_id test1 --cache-dir ./data
+Usage:
+    python src/run_baselines.py --source chexpert --target mimic --method tent --exp_id test1
+    python src/run_baselines.py --source chexpert --target all --method all --exp_id test1
+    python src/run_baselines.py --source chexpert --target all --method all --exp_id test1 --cache-dir ./data
 """
 
 import os
@@ -29,18 +29,17 @@ from sklearn.metrics import (
     recall_score, accuracy_score, average_precision_score
 )
 
-from pretrained_inference import load_model, AVAILABLE_MODELS
-from load_dataset import CANONICAL_LABELS
-from tta_baselines_offline import get_adapter, OFFLINE_BASELINES
+from models import load_model, AVAILABLE_MODELS
+from data import CANONICAL_LABELS
+from baselines import get_adapter, OFFLINE_BASELINES
 
-# 실험 설정
 TTA_METHODS = OFFLINE_BASELINES
 TARGET_DATASETS = ['chexpert', 'mimic', 'vindr', 'nih']
 DEFAULT_CACHE_DIR = './data'
 
 
 class CachedTestDataset(torch.utils.data.Dataset):
-    """사전 저장된 .pt 파일에서 로드한 텐서 기반 Dataset"""
+    """Tensor-backed dataset loaded from a pre-saved .pt file."""
 
     def __init__(self, images, labels, paths):
         self.images = images  # (N, 1, 224, 224)
@@ -59,7 +58,7 @@ class CachedTestDataset(torch.utils.data.Dataset):
 
 
 def load_cached_dataset(target_dataset: str, cache_dir: str = DEFAULT_CACHE_DIR):
-    """testset_*.pt 파일에서 데이터셋 로드"""
+    """Load a dataset from a testset_*.pt file."""
     cache_path = Path(cache_dir) / f"testset_{target_dataset}.pt"
     if not cache_path.exists():
         raise FileNotFoundError(f"Cached dataset not found: {cache_path}\n"
@@ -74,7 +73,7 @@ def load_cached_dataset(target_dataset: str, cache_dir: str = DEFAULT_CACHE_DIR)
 
 
 def create_dataloader_from_cached(dataset: CachedTestDataset, batch_size: int = 32, shuffle: bool = False, seed: int = 42):
-    """CachedTestDataset으로부터 DataLoader 생성 (전처리 불필요)"""
+    """Build a DataLoader from a CachedTestDataset (no preprocessing needed)."""
     from torch.utils.data import DataLoader
 
     def collate_fn(batch):
@@ -112,14 +111,10 @@ def compute_metrics_from_tensors(
     threshold: float = 0.5,
     model: nn.Module = None
 ) -> Dict:
-    """
-    예측 텐서와 레이블 텐서로부터 메트릭 계산
-    (raw logits 사용, label mapping 적용)
-    """
+    """Compute metrics from prediction and label tensors (raw logits, with label mapping)."""
     outputs = predictions.numpy()
     labels_np = labels.numpy()
 
-    # Label 매핑 생성
     label_mapping = {}
     if model is not None and hasattr(model, 'pathologies'):
         model_pathologies = model.pathologies
@@ -192,10 +187,9 @@ def run_tta_experiment(
     cache_dir: str = DEFAULT_CACHE_DIR,
     seed: int = 42,
 ) -> Dict:
-    """단일 TTA 실험 실행 (Online Evaluation) - Cached Version"""
+    """Run a single TTA experiment (online evaluation, cached version)."""
     print(f"\n{source_model.upper()} -> {target_dataset.upper()} ({tta_method.upper()}, ONLINE, CACHED, seed={seed})")
 
-    # 1. Source 모델 로드
     if tta_method == 'oracle':
         actual_model = 'all'
     else:
@@ -204,16 +198,13 @@ def run_tta_experiment(
     model_wrapper = load_model(model_name=actual_model, device=device)
     model = model_wrapper.model
 
-    # 2. Cached 데이터셋 로드 (전처리 완료 상태)
     dataset = load_cached_dataset(target_dataset, cache_dir=cache_dir)
 
-    # 3. DataLoader 생성
     dataloader = create_dataloader_from_cached(dataset, batch_size=batch_size, shuffle=False, seed=seed)
 
-    # 4. TTA Adapter 생성
     adapter = get_adapter(tta_method, model, device=device)
 
-    # 5. Online evaluation: adapt하면서 동시에 예측 수집
+    # Online evaluation: collect predictions while adapting
     _, predictions, labels = adapter.adapt(dataloader, online_eval=True, target_dataset=target_dataset)
 
     if predictions is not None and labels is not None:
@@ -222,7 +213,6 @@ def run_tta_experiment(
         print("Warning: No predictions collected during online eval")
         metrics = {}
 
-    # 6. 결과 정리
     result = {
         'source_model': source_model,
         'target_dataset': target_dataset,
@@ -246,7 +236,7 @@ def run_tta_experiment(
 
 
 def append_result_to_csv(result: Dict, output_dir: Path):
-    """단일 실험 결과를 CSV 파일에 추가"""
+    """Append a single experiment result to the CSV files."""
     summary_csv = output_dir / 'tta_summary.csv'
     detail_csv = output_dir / 'tta_detail.csv'
 
@@ -255,7 +245,7 @@ def append_result_to_csv(result: Dict, output_dir: Path):
     method = result['tta_method']
     metrics = result['metrics']
 
-    # Summary CSV에 평균 메트릭 추가
+    # Append average metrics to the summary CSV
     if 'AVERAGE' in metrics:
         if not summary_csv.exists():
             with open(summary_csv, 'w') as f:
@@ -267,7 +257,7 @@ def append_result_to_csv(result: Dict, output_dir: Path):
                    f'{avg["AUROC"]:.6f},{avg["AUPRC"]:.6f},{avg["F1"]:.6f},'
                    f'{avg["Precision"]:.6f},{avg["Recall"]:.6f},{avg["Accuracy"]:.6f}\n')
 
-    # Detail CSV에 pathology별 메트릭 추가
+    # Append per-pathology metrics to the detail CSV
     if not detail_csv.exists():
         with open(detail_csv, 'w') as f:
             f.write('Source,Target,Method,Pathology,AUROC,AUPRC,F1,Precision,Recall,Accuracy,Positive_samples,Total_samples\n')
@@ -296,7 +286,7 @@ def run_all_experiments(
     cache_dir: str = DEFAULT_CACHE_DIR,
     seed: int = 42,
 ):
-    """모든 TTA 실험 실행 (Online Evaluation) - Cached Version"""
+    """Run all TTA experiments (online evaluation, cached version)."""
     if target_datasets is None:
         target_datasets = TARGET_DATASETS
     if tta_methods is None:
@@ -306,7 +296,7 @@ def run_all_experiments(
         output_path = Path(run_dir)
         output_path.mkdir(parents=True, exist_ok=True)
     else:
-        from run_utils import make_run_dir
+        from utils import make_run_dir
         output_path = make_run_dir(output_dir)
 
     summary_csv = output_path / 'tta_summary.csv'
@@ -384,7 +374,7 @@ def run_all_experiments(
 
 
 def print_summary(results: List[Dict]):
-    """실험 결과 요약 출력"""
+    """Print a summary of experiment results."""
     print(f"\n{'='*80}")
     print("EXPERIMENT SUMMARY (Cached)")
     print(f"{'='*80}\n")

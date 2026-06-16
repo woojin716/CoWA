@@ -1,12 +1,12 @@
 """
-Test-Time Adaptation (TTA) Methods - Offline Evaluation Version
-CheXpert 분류기에 적용할 TTA 방법들 구현
+Test-Time Adaptation (TTA) baselines for offline evaluation.
 
-Offline 평가: 전체 데이터로 모델 적응 후, 적응된 모델로 전체 데이터 재평가
-(BN 제외 - stateless이므로 offline에서 AdaBN과 동일)
+Offline protocol: adapt the model over the full dataset, then re-evaluate the
+adapted model on the full dataset. BN is omitted since it is stateless and
+equivalent to AdaBN offline.
 
-지원하는 방법:
-- Source-only: TTA 없이 source 모델 그대로 사용 (baseline)
+Supported methods:
+- Source-only: no adaptation (baseline)
 - AdaBN: Adaptive Batch Normalization (Li et al., ICLR 2017)
 - TENT: Test-Time Entropy Minimization (Wang et al., ICLR 2021)
 - EATA: Efficient Anti-forgetting Test-Time Adaptation (Niu et al., ICML 2022)
@@ -31,7 +31,7 @@ import torchvision.transforms as transforms
 
 
 class BaseAdapter:
-    """TTA Adapter의 기본 클래스 (Offline)"""
+    """Base class for offline TTA adapters."""
 
     def __init__(self, model: nn.Module, device: str = 'cuda'):
         self.model = model
@@ -40,7 +40,7 @@ class BaseAdapter:
 
     @staticmethod
     def _seed_everything(seed: int = 42):
-        """재현성을 위한 시드 고정"""
+        """Fix seeds for reproducibility."""
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -51,9 +51,9 @@ class BaseAdapter:
 
     def adapt(self, dataloader: DataLoader, **kwargs) -> Tuple[nn.Module, torch.Tensor, torch.Tensor]:
         """
-        Offline adaptation 수행
-        Pass 1: 전체 데이터로 모델 적응
-        Pass 2: 적응된 모델로 전체 데이터 예측
+        Run offline adaptation.
+        Pass 1: adapt the model over the full dataset.
+        Pass 2: predict the full dataset with the adapted model.
 
         Returns:
             model: Adapted model
@@ -63,7 +63,7 @@ class BaseAdapter:
         raise NotImplementedError
 
     def _evaluate(self, dataloader: DataLoader) -> Tuple[torch.Tensor, torch.Tensor]:
-        """적응된 모델로 전체 데이터 예측 (Pass 2)"""
+        """Predict the full dataset with the adapted model (Pass 2)."""
         self.model.eval()
         all_predictions = []
         all_labels = []
@@ -85,7 +85,7 @@ class BaseAdapter:
 
 
 class SourceOnlyAdapter(BaseAdapter):
-    """Source-only baseline: TTA 없이 source 모델 그대로 사용"""
+    """Source-only baseline: use the source model without adaptation."""
 
     def __init__(self, model: nn.Module, device: str = 'cuda'):
         super().__init__(model, device)
@@ -107,9 +107,8 @@ class AdaBNAdapter(BaseAdapter):
     AdaBN: Adaptive Batch Normalization (Offline)
     Li et al., ICLR 2017 Workshop
 
-    Offline 버전:
-    - Pass 1: 전체 target 데이터로 BN running stats 누적
-    - Pass 2: 누적된 stats로 전체 데이터 예측
+    Pass 1: accumulate BN running stats over the full target data.
+    Pass 2: predict the full dataset with the accumulated stats.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda', momentum=None, **kwargs):
@@ -132,7 +131,7 @@ class AdaBNAdapter(BaseAdapter):
                 module.reset_running_stats()
                 module.momentum = self.momentum
 
-        # Pass 1: 전체 데이터로 BN stats 누적
+        # Pass 1: accumulate BN stats over the full dataset
         self.model.train()
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="AdaBN stats collection", leave=False, ncols=80):
@@ -141,7 +140,7 @@ class AdaBNAdapter(BaseAdapter):
 
         print("AdaBN (Offline): Stats collection completed")
 
-        # Pass 2: 적응된 모델로 전체 데이터 예측
+        # Pass 2: predict the full dataset with the adapted model
         predictions, labels = self._evaluate(dataloader)
         return self.model, predictions, labels
 
@@ -155,9 +154,8 @@ class TENTAdapter(BaseAdapter):
     TENT: Test-Time Entropy Minimization (Offline)
     Wang et al., ICLR 2021
 
-    Offline 버전:
-    - Pass 1: 전체 데이터로 entropy minimization (BN params 업데이트)
-    - Pass 2: 적응된 모델로 전체 데이터 예측
+    Pass 1: entropy minimization over the full dataset (updates BN params).
+    Pass 2: predict the full dataset with the adapted model.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -189,7 +187,7 @@ class TENTAdapter(BaseAdapter):
         total_loss = 0.0
         num_batches = 0
 
-        # Pass 1: 전체 데이터로 adaptation
+        # Pass 1: adaptation over the full dataset
         for batch in tqdm(dataloader, desc="TENT adaptation", leave=False, ncols=80):
             images = batch['image'].to(self.device)
 
@@ -208,12 +206,12 @@ class TENTAdapter(BaseAdapter):
         avg_loss = total_loss / num_batches if num_batches > 0 else 0
         print(f"TENT (Offline): Adaptation completed. Average loss: {avg_loss:.4f}")
 
-        # Pass 2: 적응된 모델로 전체 데이터 예측
+        # Pass 2: predict the full dataset with the adapted model
         predictions, labels = self._evaluate(dataloader)
         return self.model, predictions, labels
 
     def _entropy_loss(self, probs: torch.Tensor) -> torch.Tensor:
-        # model output은 이미 sigmoid 통과된 값
+        # model output is already sigmoid-applied
         entropy = -probs * torch.log(probs + 1e-10) - (1 - probs) * torch.log(1 - probs + 1e-10)
         return entropy.mean()
 
@@ -227,9 +225,8 @@ class EATAAdapter(BaseAdapter):
     EATA: Efficient Anti-forgetting Test-Time Adaptation (Offline)
     Niu et al., ICML 2022
 
-    Offline 버전:
-    - Pass 1: Fisher 추정 + reliable sample entropy minimization
-    - Pass 2: 적응된 모델로 전체 데이터 예측
+    Pass 1: Fisher estimation + reliable-sample entropy minimization.
+    Pass 2: predict the full dataset with the adapted model.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -267,11 +264,11 @@ class EATAAdapter(BaseAdapter):
         print(f"EATA (Offline): Initialized ({len(self.params)} BN params, e_margin={e_margin}, fisher_alpha={fisher_alpha})")
 
     def _compute_fishers(self, dataloader):
-        """Fisher information 추정"""
+        """Estimate Fisher information."""
         self.model.train()
         for batch in dataloader:
             images = batch['image'].to(self.device)
-            probs = self.model(images)  # 이미 sigmoid 통과된 값
+            probs = self.model(images)  # already sigmoid-applied
             ent = (-probs * torch.log(probs + 1e-10)
                    - (1 - probs) * torch.log(1 - probs + 1e-10)).mean()
             ent.backward()
@@ -289,7 +286,6 @@ class EATAAdapter(BaseAdapter):
         self._seed_everything()
         print(f"EATA (Offline): Starting adaptation")
 
-        # Fisher 추정
         print("  EATA: Estimating Fisher...")
         self._compute_fishers(dataloader)
 
@@ -305,7 +301,7 @@ class EATAAdapter(BaseAdapter):
             total_samples += images.size(0)
 
             for _ in range(self.steps):
-                probs = self.model(images)  # 이미 sigmoid 통과된 값
+                probs = self.model(images)  # already sigmoid-applied
                 ent = (-probs * torch.log(probs + 1e-10)
                        - (1 - probs) * torch.log(1 - probs + 1e-10)).mean(dim=1) / self.log2
 
@@ -350,9 +346,8 @@ class SARAdapter(BaseAdapter):
     SAR: Sharpness-Aware and Reliable entropy minimization (Offline)
     Niu et al., ICLR 2023
 
-    Offline 버전:
-    - Pass 1: 전체 데이터로 reliable entropy + SAM
-    - Pass 2: 적응된 모델로 전체 데이터 예측
+    Pass 1: reliable entropy + SAM over the full dataset.
+    Pass 2: predict the full dataset with the adapted model.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -397,7 +392,7 @@ class SARAdapter(BaseAdapter):
             total_samples += images.size(0)
 
             for _ in range(self.steps):
-                probs = self.model(images)  # 이미 sigmoid 통과된 값
+                probs = self.model(images)  # already sigmoid-applied
                 ent = (-probs * torch.log(probs + 1e-10)
                        - (1 - probs) * torch.log(1 - probs + 1e-10)).mean(dim=1) / self.log2
 
@@ -425,7 +420,7 @@ class SARAdapter(BaseAdapter):
                             p.data.add_(p.grad * scale)
 
                 # SAM: second forward (at perturbed point)
-                probs2 = self.model(images)  # 이미 sigmoid 통과된 값
+                probs2 = self.model(images)  # already sigmoid-applied
                 ent2 = (-probs2 * torch.log(probs2 + 1e-10)
                         - (1 - probs2) * torch.log(1 - probs2 + 1e-10)).mean(dim=1) / self.log2
                 loss2 = ent2[reliable_mask].mean()
@@ -460,9 +455,8 @@ class CoTTAAdapter(BaseAdapter):
     CoTTA: Continual Test-Time Adaptation (Offline)
     Wang et al., CVPR 2022
 
-    Offline 버전:
-    - Pass 1: 전체 데이터로 teacher-student adaptation
-    - Pass 2: teacher model로 전체 데이터 예측
+    Pass 1: teacher-student adaptation over the full dataset.
+    Pass 2: predict the full dataset with the teacher model.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -524,14 +518,14 @@ class CoTTAAdapter(BaseAdapter):
         avg_loss = total_loss / num_batches if num_batches > 0 else 0
         print(f"CoTTA (Offline): Adaptation completed. Average loss: {avg_loss:.4f}")
 
-        # Pass 2: teacher model로 evaluation
+        # Pass 2: evaluate with the teacher model
         self.teacher_model.eval()
-        self.model = self.teacher_model  # _evaluate에서 self.model 사용
+        self.model = self.teacher_model  # _evaluate uses self.model
         predictions, labels = self._evaluate(dataloader)
         return self.teacher_model, predictions, labels
 
     def _entropy_loss(self, probs: torch.Tensor) -> torch.Tensor:
-        # model output은 이미 sigmoid 통과된 값
+        # model output is already sigmoid-applied
         entropy = -probs * torch.log(probs + 1e-10) - (1 - probs) * torch.log(1 - probs + 1e-10)
         return entropy.mean()
 
@@ -562,11 +556,10 @@ class MEMOAdapter(BaseAdapter):
     MEMO: Test Time Robustness via Adaptation and Augmentation
     Zhang et al., NeurIPS 2022
 
-    Per-sample adaptation:
-    - 각 test sample에 대해 augmented views 생성
-    - Marginal entropy 최소화로 BN params 업데이트
-    - 적응 후 예측, 다음 sample 전 모델 reset
-    - 1 pass (per-sample adapt → predict → reset)
+    Per-sample adaptation (single pass: adapt -> predict -> reset):
+    - generate augmented views for each test sample
+    - update BN params by minimizing marginal entropy
+    - predict, then reset the model before the next sample
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -674,9 +667,8 @@ class RoTTAAdapter(BaseAdapter):
     RoTTA: Robust Test-Time Adaptation (Offline)
     Yuan et al., CVPR 2023
 
-    Offline 버전:
-    - Pass 1: 전체 데이터로 robust BN + memory bank + teacher-student adaptation
-    - Pass 2: teacher model로 전체 데이터 예측
+    Pass 1: robust BN + memory bank + teacher-student adaptation over the full dataset.
+    Pass 2: predict the full dataset with the teacher model.
     """
 
     def __init__(self, model: nn.Module, device: str = 'cuda',
@@ -763,7 +755,7 @@ class RoTTAAdapter(BaseAdapter):
         avg_loss = total_loss / num_batches if num_batches > 0 else 0
         print(f"RoTTA (Offline): Adaptation completed. Average loss: {avg_loss:.4f}")
 
-        # Pass 2: teacher model로 evaluation
+        # Pass 2: evaluate with the teacher model
         self.teacher_model.eval()
         self.model = self.teacher_model
         predictions, labels = self._evaluate(dataloader)
@@ -812,7 +804,7 @@ class RoTTAAdapter(BaseAdapter):
                 )
 
     def _cross_entropy_loss(self, student_probs, teacher_probs):
-        # model output은 이미 sigmoid 통과된 값 — sigmoid 재적용 없음
+        # model output is already sigmoid-applied; no re-application of sigmoid
         teacher_probs = teacher_probs.detach()
         loss = -teacher_probs * torch.log(student_probs + 1e-10) \
                - (1 - teacher_probs) * torch.log(1 - student_probs + 1e-10)
@@ -832,7 +824,7 @@ class RoTTAAdapter(BaseAdapter):
 
 
 def _load_baseline_configs():
-    """tta_baseline_configs.json에서 기본 하이퍼파라미터 로드"""
+    """Load default hyperparameters from tta_baseline_configs.json."""
     import json
     config_path = Path(__file__).parent.parent / 'configs' / 'tta_baseline_configs.json'
     if config_path.exists():
@@ -856,8 +848,8 @@ ADAPTERS = {
 
 def get_adapter(method: str, model: nn.Module, device: str = 'cuda', **kwargs) -> BaseAdapter:
     """
-    Get TTA adapter for offline evaluation
-    Config 파일의 기본값을 적용하고, kwargs로 override 가능
+    Get a TTA adapter for offline evaluation.
+    Applies defaults from the config file; kwargs override them.
     """
     if method not in ADAPTERS:
         raise ValueError(f"Unknown TTA method: {method}. Available: {list(ADAPTERS.keys())}")
@@ -870,7 +862,7 @@ def get_adapter(method: str, model: nn.Module, device: str = 'cuda', **kwargs) -
     return ADAPTERS[method](model, device, **config)
 
 
-# Offline TTA baseline 리스트 (BN 제외, MEMO 추가)
+# Offline TTA baselines (BN excluded)
 OFFLINE_BASELINES = [
     'source_only',  # Lower bound
     'tent',         # Offline TENT (full pass adapt → eval)

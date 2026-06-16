@@ -1,6 +1,5 @@
 """
-데이터셋 로더 모듈
-CheXpert, PadChest, MIMIC-CXR, VinDR-CXR 데이터셋을 위한 PyTorch Dataset 클래스들
+Dataset loaders: PyTorch Dataset classes for CheXpert, PadChest, MIMIC-CXR, VinDR-CXR and NIH.
 """
 
 import os
@@ -17,7 +16,7 @@ import hashlib
 
 
 
-# 공통 라벨 정의 (Canonical Labels)
+# Canonical labels shared across all datasets
 CANONICAL_LABELS = [
     'Atelectasis',
     'Cardiomegaly',
@@ -29,16 +28,7 @@ CANONICAL_LABELS = [
 
 
 class CheXpertDataset(Dataset):
-    """
-    CheXpert 데이터셋 로더
-
-    Args:
-        csv_path: CSV 파일 경로 (chexpert_train_info.csv or chexpert_test_info.csv)
-        img_root_dir: 이미지 루트 디렉토리
-        transform: 이미지 변환 (torchvision transforms)
-        return_labels: 라벨을 반환할지 여부
-        use_canonical_labels: 공통 라벨 사용 여부
-    """
+    """CheXpert dataset loader."""
 
     LABEL_COLUMNS = [
         'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
@@ -47,7 +37,7 @@ class CheXpertDataset(Dataset):
         'Pleural Other', 'Pneumonia', 'Pneumothorax', 'Support Devices'
     ]
 
-    # CheXpert 라벨 → Canonical 라벨 매핑
+    # CheXpert label -> canonical label mapping
     LABEL_MAPPING = {
         'Atelectasis': 'Atelectasis',
         'Cardiomegaly': 'Cardiomegaly',
@@ -64,19 +54,13 @@ class CheXpertDataset(Dataset):
         self.return_labels = return_labels
         self.use_canonical_labels = use_canonical_labels
 
-        # 정면 샘플만 필터링
         if frontal_only:
             self.df = self.df[self.df['Frontal/Lateral'] == 'Frontal'].reset_index(drop=True)
 
-        # 이미지 경로 처리
         self._process_image_paths()
 
-        # print 제거 - get_dataset에서 통합 출력
-
     def _process_image_paths(self):
-        """이미지 경로를 실제 경로로 변환"""
         if self.img_root_dir:
-            # CSV의 경로에서 파일명 추출하여 실제 경로로 변환
             self.df['image_path'] = self.df['resized_img_path'].apply(
                 lambda x: self._convert_path(x)
             )
@@ -84,16 +68,15 @@ class CheXpertDataset(Dataset):
             self.df['image_path'] = self.df['resized_img_path']
 
     def _convert_path(self, original_path):
-        """CSV의 원본 경로를 실제 경로로 변환"""
-        # patient/study/view 구조 추출
+        """Map a CSV path to an actual path under img_root_dir."""
         parts = Path(original_path).parts
-        # train 또는 valid 이후의 경로 추출
+        # Take the path relative to the 'train'/'valid' segment
         try:
             idx = parts.index('train') if 'train' in parts else parts.index('valid')
             relative_path = Path(*parts[idx:])
             return self.img_root_dir / relative_path
         except:
-            # 실패시 파일명만 사용
+            # Fall back to filename only
             return self.img_root_dir / Path(original_path).name
 
     def __len__(self):
@@ -102,7 +85,6 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        # 이미지 로드
         img_path = row['image_path']
         image = Image.open(img_path).convert('L')
 
@@ -111,18 +93,16 @@ class CheXpertDataset(Dataset):
 
         if self.return_labels:
             if self.use_canonical_labels:
-                # Canonical 라벨 사용
                 labels = torch.zeros(len(CANONICAL_LABELS), dtype=torch.float32)
                 for orig_label, canon_label in self.LABEL_MAPPING.items():
                     if canon_label not in CANONICAL_LABELS:
                         continue
                     if orig_label in self.LABEL_COLUMNS:
                         val = row[orig_label]
-                        if not pd.isna(val) and float(val) > 0:  # -1이나 1을 모두 positive로 처리
+                        if not pd.isna(val) and float(val) > 0:  # treat both -1 and 1 as positive
                             canon_idx = CANONICAL_LABELS.index(canon_label)
                             labels[canon_idx] = max(labels[canon_idx], float(val))
             else:
-                # 원본 라벨 사용
                 labels = []
                 for col in self.LABEL_COLUMNS:
                     val = row[col]
@@ -149,18 +129,9 @@ class CheXpertDataset(Dataset):
 
 
 class PadChestDataset(Dataset):
-    """
-    PadChest 데이터셋 로더
+    """PadChest dataset loader."""
 
-    Args:
-        csv_path: CSV 파일 경로
-        img_dir: 이미지 디렉토리
-        transform: 이미지 변환
-        filter_labels: 특정 라벨만 필터링할 리스트 (None이면 모든 라벨 사용)
-        use_canonical_labels: 공통 라벨 사용 여부
-    """
-
-    # PadChest 라벨 → Canonical 라벨 매핑
+    # PadChest label -> canonical label mapping
     LABEL_MAPPING = {
         'atelectasis': 'Atelectasis',
         'cardiomegaly': 'Cardiomegaly',
@@ -176,14 +147,14 @@ class PadChestDataset(Dataset):
         self.filter_labels = filter_labels
         self.use_canonical_labels = use_canonical_labels
 
-        # 캐시 키 생성 (csv_path, frontal_only를 기반으로)
+        # Cache key derived from csv_path and frontal_only
         cache_key = f"{csv_path}_{frontal_only}"
         cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
         cache_dir = Path(csv_path).parent / '.cache'
         cache_dir.mkdir(exist_ok=True)
         cache_file = cache_dir / f"padchest_{cache_hash}.pkl"
 
-        # 캐시 파일이 있고 CSV보다 최신이면 로드
+        # Use the cache only if it is newer than the CSV
         csv_mtime = Path(csv_path).stat().st_mtime
         if cache_file.exists() and cache_file.stat().st_mtime > csv_mtime:
             print(f"Loading cached PadChest data from {cache_file.name}...")
@@ -193,16 +164,14 @@ class PadChestDataset(Dataset):
             print(f"Processing PadChest CSV (this may take a minute on first run)...")
             self.df = pd.read_csv(csv_path, index_col=0)
 
-            # 정면 샘플만 필터링 (PA, AP 등)
+            # Keep only frontal projections
             if frontal_only:
-                # Projection 컬럼에서 정면 뷰만 선택 (PA, AP, AP_horizontal, COSTAL)
                 frontal_projections = ['PA', 'AP', 'AP_horizontal', 'COSTAL']
                 self.df = self.df[self.df['Projection'].isin(frontal_projections)].reset_index(drop=True)
 
-            # Labels 컬럼을 리스트로 변환
             self.df['Labels_list'] = self.df['Labels'].apply(self._parse_labels)
 
-            # 이미지가 실제로 존재하는 행만 필터링
+            # Keep only rows whose image exists on disk
             print(f"Filtering images that exist on disk...")
             original_count = len(self.df)
             self.df['exists'] = self.df['ImageID'].apply(lambda x: (self.img_dir / x).exists())
@@ -211,23 +180,22 @@ class PadChestDataset(Dataset):
             if filtered_count > 0:
                 print(f"Filtered out {filtered_count} images that don't exist on disk ({len(self.df)} remaining)")
 
-            # 캐시에 저장
             with open(cache_file, 'wb') as f:
                 pickle.dump(self.df, f)
             print(f"Cached processed data to {cache_file.name}")
 
-        # Stratified sampling (canonical labels 기준 positive/negative 비율 유지)
+        # Stratified sampling keeps the positive/negative ratio of canonical labels
         if stratified and max_samples is not None:
             self.df = self._stratified_sample(max_samples, skip_samples, random_seed)
         else:
-            # 기존 방식: skip_samples 적용 후 max_samples 적용
+            # Plain slicing: apply skip_samples, then max_samples
             if skip_samples > 0 and len(self.df) > skip_samples:
                 self.df = self.df.iloc[skip_samples:].reset_index(drop=True)
 
             if max_samples is not None and len(self.df) > max_samples:
                 self.df = self.df.iloc[:max_samples].reset_index(drop=True)
 
-        # 모든 고유 라벨 추출
+        # Determine the set of labels to use
         if use_canonical_labels:
             self.all_labels = CANONICAL_LABELS
         elif filter_labels is None:
@@ -240,31 +208,27 @@ class PadChestDataset(Dataset):
 
         self.label_to_idx = {label: idx for idx, label in enumerate(self.all_labels)}
 
-        # print 제거 - get_dataset에서 통합 출력
-
     def _parse_labels(self, label_str):
-        """라벨 문자열을 리스트로 변환하고 정제"""
+        """Parse a label string into a cleaned list of labels."""
         try:
             labels = ast.literal_eval(label_str) if isinstance(label_str, str) else []
-            # 공백 제거 및 빈 문자열 필터링
             labels = [label.strip() for label in labels if isinstance(label, str)]
-            labels = [label for label in labels if label]  # 빈 문자열 제거
+            labels = [label for label in labels if label]  # drop empty strings
             return labels
         except:
             return []
 
     def _has_canonical_positive(self, labels_list):
-        """canonical labels 중 하나라도 있으면 True"""
+        """True if any label maps to a canonical label."""
         for label in labels_list:
             if label.lower() in self.LABEL_MAPPING:
                 return True
         return False
 
     def _stratified_sample(self, max_samples, skip_samples, random_seed):
-        """Canonical labels 기준으로 stratified sampling"""
+        """Stratified sampling that preserves the canonical positive/negative ratio."""
         np.random.seed(random_seed)
 
-        # Positive/Negative 분리
         self.df['_is_positive'] = self.df['Labels_list'].apply(self._has_canonical_positive)
 
         positive_df = self.df[self.df['_is_positive']].copy()
@@ -274,13 +238,11 @@ class PadChestDataset(Dataset):
         total_negative = len(negative_df)
         total = total_positive + total_negative
 
-        # 원본 비율 계산
         positive_ratio = total_positive / total if total > 0 else 0
 
         print(f"Original data: {total_positive} positive ({positive_ratio*100:.1f}%), {total_negative} negative")
 
-        # skip_samples가 있으면 train/test 분리를 위해 적용
-        # stratified 모드에서는 skip_samples를 비율 기반으로 적용
+        # Apply skip_samples per class so the train/test split keeps the ratio
         if skip_samples > 0:
             skip_positive = int(skip_samples * positive_ratio)
             skip_negative = skip_samples - skip_positive
@@ -288,15 +250,14 @@ class PadChestDataset(Dataset):
             positive_df = positive_df.iloc[skip_positive:].reset_index(drop=True)
             negative_df = negative_df.iloc[skip_negative:].reset_index(drop=True)
 
-        # 샘플링할 개수 계산 (비율 유지)
+        # Number to sample per class, preserving the ratio
         n_positive = int(max_samples * positive_ratio)
         n_negative = max_samples - n_positive
 
-        # 실제 가능한 수로 조정
+        # Clamp to what is actually available
         n_positive = min(n_positive, len(positive_df))
         n_negative = min(n_negative, len(negative_df))
 
-        # 랜덤 샘플링
         if len(positive_df) > n_positive:
             positive_indices = np.random.choice(len(positive_df), n_positive, replace=False)
             positive_sampled = positive_df.iloc[positive_indices]
@@ -309,11 +270,10 @@ class PadChestDataset(Dataset):
         else:
             negative_sampled = negative_df
 
-        # 합치고 셔플
+        # Combine and shuffle
         result_df = pd.concat([positive_sampled, negative_sampled], ignore_index=True)
         result_df = result_df.sample(frac=1, random_state=random_seed).reset_index(drop=True)
 
-        # 임시 컬럼 제거
         result_df = result_df.drop(columns=['_is_positive'])
 
         actual_positive = len(positive_sampled)
@@ -328,31 +288,26 @@ class PadChestDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        # 이미지 로드
         img_name = row['ImageID']
         img_path = self.img_dir / img_name
 
         image = Image.open(img_path)
 
-        # 16-bit grayscale 이미지 처리
+        # Convert 16-bit grayscale (0-65535) down to 8-bit (0-255)
         if image.mode == 'I;16':
-            # 16-bit를 8-bit로 변환
             image = np.array(image, dtype=np.float32)
-            # 정규화 (0-65535 -> 0-255)
             image = (image / 256).astype(np.uint8)
             image = Image.fromarray(image, mode='L')
 
-        # RGB로 변환
         image = image.convert('L')
 
         if self.transform:
             image = self.transform(image)
 
-        # 멀티-라벨 원-핫 인코딩
+        # Multi-label one-hot encoding
         labels = torch.zeros(len(self.all_labels), dtype=torch.float32)
 
         if self.use_canonical_labels:
-            # Canonical 라벨로 변환
             for label in row['Labels_list']:
                 label_lower = label.lower()
                 if label_lower in self.LABEL_MAPPING:
@@ -362,7 +317,6 @@ class PadChestDataset(Dataset):
                     canon_idx = CANONICAL_LABELS.index(canon_label)
                     labels[canon_idx] = 1.0
         else:
-            # 원본 라벨 사용
             for label in row['Labels_list']:
                 if label in self.label_to_idx:
                     labels[self.label_to_idx[label]] = 1.0
@@ -380,18 +334,7 @@ class PadChestDataset(Dataset):
 
 
 class MIMICCXRDataset(Dataset):
-    """
-    MIMIC-CXR 데이터셋 로더
-
-    Args:
-        label_csv_path: 라벨 CSV 파일 경로 (mimic-cxr-2.0.0-chexpert.csv.gz)
-        metadata_csv_path: 메타데이터 CSV 파일 경로 (mimic-cxr-2.0.0-metadata.csv.gz)
-        split_csv_path: train/val/test split CSV 파일 경로 (mimic-cxr-2.0.0-split.csv.gz)
-        img_root_dir: 이미지 루트 디렉토리 (files/)
-        transform: 이미지 변환
-        split: 'train', 'validate', 'test' 중 하나 (None이면 전체)
-        use_canonical_labels: 공통 라벨 사용 여부
-    """
+    """MIMIC-CXR dataset loader. split is one of 'train', 'validate', 'test' (None loads all)."""
 
     LABEL_COLUMNS = [
         'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
@@ -400,7 +343,7 @@ class MIMICCXRDataset(Dataset):
         'Pleural Other', 'Pneumonia', 'Pneumothorax', 'Support Devices'
     ]
 
-    # MIMIC-CXR 라벨 → Canonical 라벨 매핑
+    # MIMIC-CXR label -> canonical label mapping
     LABEL_MAPPING = {
         'Atelectasis': 'Atelectasis',
         'Cardiomegaly': 'Cardiomegaly',
@@ -416,14 +359,14 @@ class MIMICCXRDataset(Dataset):
         self.transform = transform
         self.use_canonical_labels = use_canonical_labels
 
-        # 캐시 키 생성 (split, frontal_only를 기반으로)
+        # Cache key derived from split and frontal_only
         cache_key = f"{split_csv_path}_{split}_{frontal_only}"
         cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
         cache_dir = Path(split_csv_path).parent / '.cache'
         cache_dir.mkdir(exist_ok=True)
         cache_file = cache_dir / f"mimic_{cache_hash}.pkl"
 
-        # 캐시 파일이 있고 CSV들보다 최신이면 로드
+        # Use the cache only if it is newer than all source CSVs
         csv_mtimes = [
             Path(label_csv_path).stat().st_mtime,
             Path(metadata_csv_path).stat().st_mtime,
@@ -437,41 +380,35 @@ class MIMICCXRDataset(Dataset):
                 self.df = pickle.load(f)
         else:
             print(f"Processing MIMIC-CXR CSV files (this may take a minute on first run)...")
-            # CSV 파일 로드 (gzip 압축 파일 지원)
             self.labels_df = self._read_csv(label_csv_path)
             self.metadata_df = self._read_csv(metadata_csv_path)
             self.split_df = self._read_csv(split_csv_path)
 
-            # split_df에 이미 dicom_id, study_id, subject_id, split이 있음
-            # metadata에서 ViewPosition만 추가로 병합
+            # split_df already has dicom_id/study_id/subject_id/split; merge ViewPosition from metadata
             self.df = self.split_df.merge(
                 self.metadata_df[['dicom_id', 'ViewPosition']],
                 on='dicom_id', how='left'
             )
 
-            # subject_id와 study_id 기준으로 라벨 병합
+            # Merge labels on subject_id and study_id
             self.df = self.df.merge(
                 self.labels_df,
                 on=['subject_id', 'study_id'], how='left'
             )
 
-            # split 필터링
             if split is not None:
                 self.df = self.df[self.df['split'] == split].reset_index(drop=True)
 
-            # 정면 샘플만 필터링 (PA 또는 AP)
+            # Keep only frontal views (PA or AP)
             if frontal_only:
                 self.df = self.df[self.df['ViewPosition'].isin(['PA', 'AP'])].reset_index(drop=True)
 
-            # 캐시에 저장
             with open(cache_file, 'wb') as f:
                 pickle.dump(self.df, f)
             print(f"Cached processed data to {cache_file.name}")
 
-        # print 제거 - get_dataset에서 통합 출력
-
     def _read_csv(self, path):
-        """CSV 파일 읽기 (gzip 지원)"""
+        """Read a CSV, transparently handling gzip-compressed files."""
         if str(path).endswith('.gz'):
             with gzip.open(path, 'rt') as f:
                 return pd.read_csv(f)
@@ -479,7 +416,7 @@ class MIMICCXRDataset(Dataset):
             return pd.read_csv(path)
 
     def _get_image_path(self, dicom_id, subject_id, study_id):
-        """dicom_id, subject_id, study_id로 이미지 경로 생성 (exists 체크 없음)"""
+        """Build the image path from dicom_id/subject_id/study_id (no existence check)."""
         p_dir = f"p{str(subject_id)[:2]}"
         patient_dir = f"p{subject_id}"
         study_dir = f"s{study_id}"
@@ -492,7 +429,6 @@ class MIMICCXRDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        # 이미지 경로 생성 (exists 체크 없이 직접 로드)
         img_path = self._get_image_path(row['dicom_id'], row['subject_id'], row['study_id'])
 
         try:
@@ -503,20 +439,17 @@ class MIMICCXRDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        # 라벨 추출
         if self.use_canonical_labels:
-            # Canonical 라벨 사용
             labels = torch.zeros(len(CANONICAL_LABELS), dtype=torch.float32)
             for orig_label, canon_label in self.LABEL_MAPPING.items():
                 if canon_label not in CANONICAL_LABELS:
                     continue
                 if orig_label in self.LABEL_COLUMNS:
                     val = row[orig_label]
-                    if not pd.isna(val) and float(val) > 0:  # -1이나 1을 모두 positive로 처리
+                    if not pd.isna(val) and float(val) > 0:  # treat both -1 and 1 as positive
                         canon_idx = CANONICAL_LABELS.index(canon_label)
                         labels[canon_idx] = max(labels[canon_idx], float(val))
         else:
-            # 원본 라벨 사용
             labels = []
             for col in self.LABEL_COLUMNS:
                 val = row[col]
@@ -539,18 +472,9 @@ class MIMICCXRDataset(Dataset):
 
 
 class VinDRCXRDataset(Dataset):
-    """
-    VinDR-CXR 데이터셋 로더
+    """VinDR-CXR dataset loader. aggregate_train_labels merges multiple radiologist annotations by majority vote."""
 
-    Args:
-        csv_path: 라벨 CSV 파일 경로 (image_labels_test.csv or image_labels_train.csv)
-        img_dir: DICOM 이미지 디렉토리
-        transform: 이미지 변환
-        use_canonical_labels: 공통 라벨 사용 여부
-        aggregate_train_labels: train set에서 여러 radiologist 평가를 집계할지 여부 (majority voting)
-    """
-
-    # VinDR-CXR의 모든 라벨
+    # All VinDR-CXR labels
     LABEL_COLUMNS = [
         'Aortic enlargement', 'Atelectasis', 'Calcification', 'Cardiomegaly',
         'Clavicle fracture', 'Consolidation', 'Edema', 'Emphysema',
@@ -561,7 +485,7 @@ class VinDRCXRDataset(Dataset):
         'COPD', 'Lung tumor', 'Pneumonia', 'Tuberculosis'
     ]
 
-    # VinDR-CXR 라벨 → Canonical 라벨 매핑
+    # VinDR-CXR label -> canonical label mapping
     LABEL_MAPPING = {
         'Atelectasis': 'Atelectasis',
         'Cardiomegaly': 'Cardiomegaly',
@@ -577,14 +501,14 @@ class VinDRCXRDataset(Dataset):
         self.use_canonical_labels = use_canonical_labels
         self.aggregate_train_labels = aggregate_train_labels
 
-        # 캐시 키 생성 (csv_path, aggregate_train_labels, filter_missing를 기반으로)
+        # Cache key derived from csv_path and aggregate_train_labels
         cache_key = f"{csv_path}_{aggregate_train_labels}_v2"  # v2: filter missing files
         cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
         cache_dir = Path(csv_path).parent / '.cache'
         cache_dir.mkdir(exist_ok=True)
         cache_file = cache_dir / f"vindr_{split}_{cache_hash}.pkl"
 
-        # 캐시 파일이 있고 CSV보다 최신이면 로드
+        # Use the cache only if it is newer than the CSV
         csv_mtime = Path(csv_path).stat().st_mtime
         if cache_file.exists() and cache_file.stat().st_mtime > csv_mtime:
             print(f"Loading cached VinDR-CXR data from {cache_file.name}...")
@@ -596,14 +520,13 @@ class VinDRCXRDataset(Dataset):
             print(f"Processing VinDR-CXR CSV (this may take a minute on first run)...")
             self.df = pd.read_csv(csv_path)
 
-            # train set인지 확인 (rad_id 컬럼이 있으면 train)
+            # The train set has a rad_id column; the test set does not
             self.is_train = 'rad_id' in self.df.columns
 
-            # train set이고 aggregate가 True면 majority voting으로 집계
             if self.is_train and self.aggregate_train_labels:
                 self._aggregate_labels()
 
-            # 이미지가 실제로 존재하는 행만 필터링
+            # Keep only rows whose image exists on disk
             print(f"Filtering images that exist on disk...")
             original_count = len(self.df)
             self.df['exists'] = self.df['image_id'].apply(
@@ -614,36 +537,32 @@ class VinDRCXRDataset(Dataset):
             if filtered_count > 0:
                 print(f"  → Filtered out {filtered_count} missing images ({len(self.df)} remaining)")
 
-            # 캐시에 저장
             with open(cache_file, 'wb') as f:
                 pickle.dump({'df': self.df, 'is_train': self.is_train}, f)
             print(f"Cached processed data to {cache_file.name}")
 
-        # 사용할 라벨 결정
         if use_canonical_labels:
             self.all_labels = CANONICAL_LABELS
         else:
             self.all_labels = self.LABEL_COLUMNS
 
     def _aggregate_labels(self):
-        """train set의 여러 radiologist 평가를 majority voting으로 집계"""
-        # 각 image_id에 대해 라벨별로 평균 계산 (0.5 이상이면 1, 아니면 0)
+        """Aggregate multiple radiologist annotations per image by majority vote (mean >= 0.5)."""
         label_cols = [col for col in self.LABEL_COLUMNS if col in self.df.columns]
 
-        # 'Other diseases'가 train에는 있고 test에는 'Other disease'로 되어있음
+        # 'Other diseases' (train) vs 'Other disease' (test) naming differs
         if 'Other diseases' in self.df.columns and 'Other disease' not in self.df.columns:
             label_cols.append('Other diseases')
         elif 'Other disease' in self.df.columns and 'Other diseases' not in self.df.columns:
             label_cols.append('Other disease')
 
-        # No finding 추가
         if 'No finding' in self.df.columns:
             label_cols.append('No finding')
 
         agg_dict = {col: 'mean' for col in label_cols}
         self.df = self.df.groupby('image_id').agg(agg_dict).reset_index()
 
-        # 0.5 threshold로 이진화
+        # Binarize at a 0.5 threshold
         for col in label_cols:
             self.df[col] = (self.df[col] >= 0.5).astype(int)
 
@@ -653,7 +572,6 @@ class VinDRCXRDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        # 이미지 로드 (JPG만 사용, exists 체크 없음)
         image_id = row['image_id']
         img_path = self.img_dir / f"{image_id}.jpg"
 
@@ -665,9 +583,7 @@ class VinDRCXRDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        # 라벨 추출
         if self.use_canonical_labels:
-            # Canonical 라벨 사용
             labels = torch.zeros(len(CANONICAL_LABELS), dtype=torch.float32)
             for orig_label, canon_label in self.LABEL_MAPPING.items():
                 if canon_label not in CANONICAL_LABELS:
@@ -678,10 +594,9 @@ class VinDRCXRDataset(Dataset):
                         canon_idx = CANONICAL_LABELS.index(canon_label)
                         labels[canon_idx] = 1.0
         else:
-            # 원본 라벨 사용
             labels = []
             for col in self.LABEL_COLUMNS:
-                # train과 test에서 컬럼명이 다를 수 있음
+                # Column names may differ between train and test
                 if col in self.df.columns:
                     val = row[col]
                 elif col == 'Other disease' and 'Other diseases' in self.df.columns:
@@ -702,7 +617,7 @@ class VinDRCXRDataset(Dataset):
             'image_id': row['image_id']
         }
 
-        # rad_id가 있으면 추가 (aggregation 안한 경우)
+        # Include rad_id when present (i.e. annotations were not aggregated)
         if 'rad_id' in row:
             result['rad_id'] = row['rad_id']
 
@@ -710,17 +625,9 @@ class VinDRCXRDataset(Dataset):
 
 
 class NIHDataset(Dataset):
-    """
-    NIH ChestX-ray14 데이터셋 로더
+    """NIH ChestX-ray14 dataset loader."""
 
-    Args:
-        csv_path: 라벨 CSV 파일 경로 (nih_test_labels.csv)
-        img_dir: 이미지 디렉토리
-        transform: 이미지 변환
-        use_canonical_labels: 공통 라벨 사용 여부
-    """
-
-    # NIH ChestX-ray14의 모든 라벨
+    # All NIH ChestX-ray14 labels
     LABEL_COLUMNS = [
         'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
         'Effusion', 'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration',
@@ -728,11 +635,11 @@ class NIHDataset(Dataset):
         'Pneumonia', 'Pneumothorax'
     ]
 
-    # NIH 라벨 → Canonical 라벨 매핑
+    # NIH label -> canonical label mapping
     LABEL_MAPPING = {
         'Atelectasis': 'Atelectasis',
         'Cardiomegaly': 'Cardiomegaly',
-        'Effusion': 'Pleural Effusion',  # NIH의 'Effusion'을 'Pleural Effusion'으로 매핑
+        'Effusion': 'Pleural Effusion',  # NIH 'Effusion' maps to 'Pleural Effusion'
         'Consolidation': 'Consolidation',
         'Pneumothorax': 'Pneumothorax',
         'Edema': 'Edema',
@@ -743,10 +650,8 @@ class NIHDataset(Dataset):
         self.transform = transform
         self.use_canonical_labels = use_canonical_labels
 
-        # CSV 파일 로드
         self.df = pd.read_csv(csv_path)
 
-        # 사용할 라벨 결정
         if use_canonical_labels:
             self.all_labels = CANONICAL_LABELS
         else:
@@ -758,7 +663,6 @@ class NIHDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        # 이미지 로드
         image_name = row['Image Index']
         img_path = self.img_dir / image_name
 
@@ -770,15 +674,13 @@ class NIHDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        # 라벨 파싱 ("|"로 구분된 다중 라벨)
+        # Finding Labels is a "|"-separated multi-label field
         finding_labels = row['Finding Labels']
         label_list = []
         if pd.notna(finding_labels) and finding_labels != '':
             label_list = [label.strip() for label in str(finding_labels).split('|')]
 
-        # 라벨 인코딩
         if self.use_canonical_labels:
-            # Canonical 라벨 사용
             labels = torch.zeros(len(CANONICAL_LABELS), dtype=torch.float32)
             for label in label_list:
                 if label in self.LABEL_MAPPING:
@@ -788,7 +690,6 @@ class NIHDataset(Dataset):
                     canon_idx = CANONICAL_LABELS.index(canon_label)
                     labels[canon_idx] = 1.0
         else:
-            # 원본 라벨 사용 (one-hot 인코딩)
             labels = torch.zeros(len(self.LABEL_COLUMNS), dtype=torch.float32)
             for label in label_list:
                 if label in self.LABEL_COLUMNS:
@@ -804,7 +705,7 @@ class NIHDataset(Dataset):
             'patient_id': row['Patient ID'],
         }
 
-        # 추가 메타데이터
+        # Optional metadata
         if 'Patient Age' in row and pd.notna(row['Patient Age']):
             result['age'] = int(row['Patient Age'])
         if 'Patient Gender' in row and pd.notna(row['Patient Gender']):
@@ -816,17 +717,14 @@ class NIHDataset(Dataset):
 
 
 def get_dataset(dataset_name, split='test', transform=None, **kwargs):
-    """
-        **kwargs: 데이터셋별 추가 인자
-            - use_canonical_labels: 공통 라벨 사용 여부 (모든 데이터셋)
-            - frontal_only: 정면 샘플만 사용 (CheXpert, PadChest, MIMIC-CXR)
-            - aggregate_train_labels: VinDR-CXR train set에서 여러 radiologist 평가 집계 여부 (기본값: True)
+    """Build a dataset by name.
 
-    Returns:
-        Dataset 객체
+    Common kwargs:
+        - use_canonical_labels: use the shared canonical labels (all datasets)
+        - frontal_only: keep frontal views only (CheXpert, PadChest, MIMIC-CXR)
+        - aggregate_train_labels: majority-vote radiologist annotations on the VinDR-CXR train set (default: True)
     """
 
-    # 기본 데이터 경로
     DATA_ROOT = Path('data')
 
     if dataset_name.lower() == 'chexpert':
@@ -848,20 +746,19 @@ def get_dataset(dataset_name, split='test', transform=None, **kwargs):
         csv_path = DATA_ROOT / 'padchest' / 'PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv'
         img_dir = DATA_ROOT / 'padchest' / 'images-224' / 'images-224'
 
-        # PadChest는 공식 train/test split이 없음
-        # Stratified sampling으로 positive/negative 비율 유지
+        # PadChest has no official train/test split; use stratified sampling to
+        # preserve the positive/negative ratio. Test takes the first 5000 samples,
+        # train starts after them. Other splits use the full dataset.
         if split == 'test':
             if 'max_samples' not in kwargs:
                 kwargs['max_samples'] = 5000
-            kwargs['skip_samples'] = 0  # 처음부터 시작
+            kwargs['skip_samples'] = 0
             if 'stratified' not in kwargs:
-                kwargs['stratified'] = True  # 기본적으로 stratified sampling 사용
+                kwargs['stratified'] = True
         elif split == 'train':
-            kwargs['skip_samples'] = 5000  # test 다음부터 시작
+            kwargs['skip_samples'] = 5000
             if 'stratified' not in kwargs:
-                kwargs['stratified'] = True  # train도 stratified sampling 사용
-            # train은 max_samples 제한 없음 (사용자가 명시하지 않는 한)
-        # 'valid'나 다른 split은 전체 데이터 사용
+                kwargs['stratified'] = True
 
         dataset = PadChestDataset(
             csv_path=csv_path,
@@ -900,15 +797,15 @@ def get_dataset(dataset_name, split='test', transform=None, **kwargs):
     elif dataset_name.lower() == 'vindr' or dataset_name.lower() == 'vindr-cxr':
         vindr_root = DATA_ROOT / 'physionet.org' / 'files' / 'vindr-cxr' / '1.0.0'
 
-        # split에 따라 적절한 CSV와 이미지 디렉토리 선택
+        # Pick the CSV and image directory for the split
         if split == 'test':
             csv_path = vindr_root / 'annotations' / 'image_labels_test.csv'
             img_dir = vindr_root / 'test'
-        else:  # train 또는 기타
+        else:
             csv_path = vindr_root / 'annotations' / 'image_labels_train.csv'
             img_dir = vindr_root / 'train'
 
-        # VinDR-CXR은 모든 이미지가 frontal이므로 frontal_only 제거
+        # All VinDR-CXR images are frontal, so drop frontal_only
         vindr_kwargs = {k: v for k, v in kwargs.items() if k != 'frontal_only'}
 
         dataset = VinDRCXRDataset(
@@ -929,11 +826,11 @@ def get_dataset(dataset_name, split='test', transform=None, **kwargs):
     elif dataset_name.lower() == 'nih' or dataset_name.lower() == 'nih-cxr14':
         nih_root = DATA_ROOT / 'nih'
 
-        # NIH는 공식 split이 없으므로 모든 데이터를 test로 간주
+        # NIH has no official split, so all data is treated as test
         csv_path = nih_root / 'nih_test_labels.csv'
         img_dir = nih_root / 'images'
 
-        # NIH는 모든 이미지가 frontal이므로 frontal_only 제거
+        # All NIH images are frontal, so drop frontal_only
         nih_kwargs = {k: v for k, v in kwargs.items() if k != 'frontal_only'}
 
         dataset = NIHDataset(
@@ -951,10 +848,8 @@ def get_dataset(dataset_name, split='test', transform=None, **kwargs):
 
 
 if __name__ == "__main__":
-    # 테스트 코드
     from torchvision import transforms
 
-    # 기본 transform
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),

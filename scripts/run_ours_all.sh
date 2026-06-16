@@ -1,6 +1,6 @@
 #!/bin/bash
-# Ours online-eval: source 3개 × target 조합 순차 실행 (single GPU)
-# 결과는 하나의 run 디렉토리(results/<YYYYMMDD>/<NNN>/)에 누적
+# CoWA: run source x target combinations sequentially on a single GPU.
+# Results accumulate in one run directory (results/<YYYYMMDD>/<NNN>/).
 
 set -e
 
@@ -12,15 +12,14 @@ EXP_ID="${1:-ours}"
 BATCH_SIZE="${2:-32}"
 DEVICE="cuda"
 
-# source → target 매핑 (padchest 제외)
+# source -> target mapping (sources: chexpert, nih; each adapts to the other 3)
 declare -A TARGETS
-TARGETS[chexpert]="mimic"
-TARGETS[mimic_ch]="chexpert"
-TARGETS[nih]="chexpert"
+TARGETS[chexpert]="mimic,vindr,nih"
+TARGETS[nih]="chexpert,mimic,vindr"
 
-# 실험 목록 생성
+# Build experiment list
 EXPERIMENTS=()
-for SOURCE in mimic_ch; do
+for SOURCE in chexpert nih; do
     IFS=',' read -ra TGTS <<< "${TARGETS[$SOURCE]}"
     for TARGET in "${TGTS[@]}"; do
         EXPERIMENTS+=("${SOURCE}|${TARGET}")
@@ -37,7 +36,7 @@ echo "  BATCH_SIZE:    $BATCH_SIZE"
 echo "  Total runs:    $TOTAL (sequential)"
 echo "============================================"
 
-RESULT_DIR=$(python src/run_utils.py results)
+RESULT_DIR=$(python src/utils.py results)
 echo "Results directory: $RESULT_DIR"
 
 FAILED=0
@@ -47,7 +46,7 @@ for i in "${!EXPERIMENTS[@]}"; do
 
     echo "[$((i+1))/$TOTAL] source=$SOURCE → target=$TARGET  (device=$DEVICE)"
 
-    python src/run_tta_experiments_ours.py \
+    python src/run_cowa.py \
         --source "$SOURCE" \
         --target "$TARGET" \
         --batch-size "$BATCH_SIZE" \

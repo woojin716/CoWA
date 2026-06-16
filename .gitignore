@@ -115,3 +115,9 @@ credentials.json
 output.png
 image_stats.json
 ablation_results_*.json
+
+# Internal analysis scripts/outputs — not part of the public release
+analysis/
+
+# Tuned hyperparameter / result configs — not part of the public release
+configs/
